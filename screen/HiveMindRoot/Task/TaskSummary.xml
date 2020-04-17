@@ -17,6 +17,13 @@ along with this software (see the LICENSE.md file). If not, see
 
     <parameter name="workEffortId" required="true"/>
 
+    <transition name="taskSummary"><default-response url="."/></transition>
+    <transition name="projectSummary"><default-response url="../../Project/ProjectSummary"/></transition>
+    <transition name="milestoneSummary"><default-response url="../../Project/MilestoneSummary"/></transition>
+
+    <transition name="editParty"><default-response url="//hmadmin/Party/EditParty"/></transition>
+    <transition name="editRequest"><default-response url="../../Request/EditRequest"/></transition>
+
     <transition name="updateTaskField">
         <actions>
             <service-call name="update#mantle.work.effort.WorkEffort" in-map="context"/>
@@ -38,14 +45,25 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="project">
                 <field-map field-name="workEffortId" from="task.rootWorkEffortId"/>
             </entity-find-one>
-            <set field="statusFlowId" from="(task.statusFlowId ?: project.statusFlowId) ?: 'Default'"/>
+            <set field="statusFlowId" from="(task.statusFlowId ?: project?.statusFlowId) ?: 'Default'"/>
 
             <!-- get current status from description in currentValue parameter -->
-            <!-- TODO: this probably won't work when localized... -->
             <entity-find-one entity-name="StatusItem" value-field="currentStatus">
                 <field-map field-name="description" from="currentValue?.trim()"/>
                 <field-map field-name="statusTypeId" value="WorkEffort"/>
             </entity-find-one>
+            <if condition="currentStatus == null">
+                <entity-find entity-name="moqui.basic.LocalizedEntityField" list="currentStatusList">
+                    <econdition field-name="localized" from="currentValue?.trim()"/>
+                    <econdition field-name="entityName" value="moqui.basic.StatusItem"/>
+                </entity-find>
+                <entity-find list="statusItemList" entity-name="moqui.basic.StatusItem">
+                    <econdition field-name="statusId" operator="in" from="currentStatusList.pkValue"/>
+                    <econdition field-name="statusTypeId" value="WorkEffort"/>
+                </entity-find>
+                <if condition="statusItemList">
+                    <set field="currentStatus" from="statusItemList.first"/></if>
+            </if>
             <entity-find entity-name="moqui.basic.StatusFlowTransitionToDetail" list="svctdList" cache="true">
                 <econdition field-name="statusFlowId" from="statusFlowId"/>
                 <econdition field-name="statusId" from="currentStatus?.statusId"/>
@@ -95,18 +113,21 @@ along with this software (see the LICENSE.md file). If not, see
     </transition>
     <transition-include name="getTaskList" location="component://SimpleScreens/template/work/WorkTransitions.xml"/>
 
-    <transition name="taskSummary"><default-response url="."/></transition>
-    <transition name="projectSummary"><default-response url="../../Project/ProjectSummary"/></transition>
-    <transition name="milestoneSummary"><default-response url="../../Project/MilestoneSummary"/></transition>
-
-    <transition name="editRequest"><default-response url="../../Request/EditRequest"/></transition>
-
-    <transition name="taskCommentReply"><default-response url="TaskCommentReply"/></transition>
-    <transition name="taskCommentUpdate"><default-response url="TaskCommentUpdate"/></transition>
     <transition name="addComment"><service-call name="mantle.work.TaskServices.add#TaskComment"/>
         <default-response url="."/></transition>
     <transition name="deleteComment"><service-call name="mantle.work.TaskServices.delete#TaskComment"/>
         <default-response url="."/></transition>
+
+    <transition name="createContent"><service-call name="mantle.work.WorkEffortServices.create#WorkEffortContent"/>
+        <default-response url="."/></transition>
+    <transition name="updateContent"><service-call name="mantle.work.WorkEffortServices.update#WorkEffortContent"/>
+        <default-response url="."/></transition>
+    <transition name="downloadContent" read-only="true">
+        <parameter name="workEffortContentId"/>
+        <actions><entity-find-one entity-name="mantle.work.effort.WorkEffortContent" value-field="workEffortContent"/>
+            <script>ec.web.sendResourceResponse(workEffortContent?.contentLocation)</script></actions>
+        <default-response type="none"/>
+    </transition>
 
     <actions>
         <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="task"/>
@@ -143,7 +164,9 @@ along with this software (see the LICENSE.md file). If not, see
         </entity-find>
         <!-- Assignments -->
         <entity-find entity-name="mantle.work.effort.WorkEffortAndPartyDetail" list="weapdList">
-            <date-filter/><econdition field-name="workEffortId"/></entity-find>
+            <date-filter/><econdition field-name="workEffortId"/>
+            <select-field field-name="partyId,firstName,lastName,organizationName,roleTypeId,statusId"/>
+        </entity-find>
         <!-- Child Tasks -->
         <entity-find entity-name="mantle.work.effort.WorkEffortAndStatus" list="childTaskList">
             <econdition field-name="parentWorkEffortId" from="workEffortId"/>
@@ -165,14 +188,17 @@ along with this software (see the LICENSE.md file). If not, see
         <!-- Wiki Pages -->
         <entity-find entity-name="mantle.work.effort.WikiPageAndWorkEffort" list="wpaweList">
             <econdition field-name="workEffortId"/></entity-find>
+        <!-- Content -->
+        <entity-find entity-name="mantle.work.effort.WorkEffortContent" list="contentList">
+            <econdition field-name="workEffortId"/><order-by field-name="-contentDate"/></entity-find>
     </actions>
     <widgets>
         <container-row>
             <row-col lg="3" md="3">
-                <container-box><box-header><label text="ID: ${workEffortId}" type="h5"/></box-header><box-body>
+                <container-box><box-header title="ID: ${workEffortId}"/><box-body>
                     <container><label text="Project: " type="strong"/></container>
-                    <link text="${project.workEffortId} - ${project.workEffortName}" url="projectSummary" link-type="anchor">
-                        <parameter name="workEffortId" from="project.workEffortId"/></link>
+                    <link text="${project.workEffortId} - ${project.workEffortName}" url="projectSummary" link-type="anchor" condition="project != null">
+                        <parameter name="workEffortId" from="project.workEffortId"/><parameter name="rootWorkEffortId" from="project.workEffortId"/></link>
 
                     <section name="MilestoneSection" condition="milestone"><widgets>
                         <container><label text="Milestone: " type="strong"/></container>
@@ -212,7 +238,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </box-body></container-box>
 
                 <container-box>
-                    <box-header><label text="Assignments" type="h5"/></box-header>
+                    <box-header title="Assignments"/>
                     <box-body>
                         <section-iterate name="TaskAssignList" list="weapdList" entry="weapd">
                             <actions>
@@ -223,7 +249,8 @@ along with this software (see the LICENSE.md file). If not, see
                             </actions>
                             <widgets>
                                 <container style="shaded-area">
-                                    <label text="${(weapd.username ? weapd.username + ': ' : '')} ${weapd.firstName?:''} ${weapd.lastName?:''} ${weapd.organizationName?:''}" type="div"/>
+                                    <container><link url="editParty" link-type="anchor" parameter-map="[partyId:weapd.partyId]"
+                                            text="${weapd.firstName?:''} ${weapd.lastName?:''} ${weapd.organizationName?:''}"/></container>
                                     <label text="${roleType?.description?:'N/A'} - ${statusItem?.description?:'N/A'}" type="div"/>
                                     <!--
                                     <section name="AssignNotificationSection"><condition><expression>weapd.partyTypeEnumId=="PtyPerson"</expression></condition>
@@ -237,7 +264,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </container-box>
 
                 <container-box>
-                    <box-header><label text="Time Entries" type="h5"/></box-header>
+                    <box-header title="Time Entries"/>
                     <box-body>
                         <section-iterate name="TimeEntryList" list="timeEntryList" entry="timeEntry">
                             <actions>
@@ -259,61 +286,52 @@ along with this software (see the LICENSE.md file). If not, see
                 <editable id="TaskDescription" text="${task.description?:''}" transition="updateTaskField" type="pre"
                         parameter-name="description"/>
 
-                <container-box>
-                    <box-header><label text="Comments" type="h5"/></box-header>
-                    <box-toolbar>
-                        <container-dialog id="AddCommentDialog" button-text="Add Comment">
-                            <form-single name="AddCommentForm" transition="addComment">
-                                <field name="workEffortId"><default-field><hidden/></default-field></field>
-                                <field name="subject"><default-field><text-line/></default-field></field>
-                                <field name="body"><default-field title="Comment"><text-area rows="10"/></default-field></field>
-                                <field name="submitButton"><default-field title="Add"><submit/></default-field></field>
-                            </form-single>
-                        </container-dialog>
-                    </box-toolbar>
-                    <box-body>
-                        <section-iterate name="CommentList" list="commEventDetailList" entry="commEventDetail">
-                            <actions>
-                                <set field="uniqueExtension" from="commEventDetail_index"/>
-                                <entity-find-one entity-name="mantle.party.Person" value-field="fromPerson" cache="true">
-                                    <field-map field-name="partyId" from="commEventDetail.fromPartyId"/>
-                                </entity-find-one>
-                                <entity-find entity-name="mantle.party.communication.CommunicationEvent" list="childCeList">
-                                    <econdition field-name="rootCommEventId" from="commEventDetail.communicationEventId"/>
-                                    <order-by field-name="entryDate"/>
-                                </entity-find>
-                            </actions>
-                            <widgets>
-                                <container style="task-comment">
-                                    <label text="${commEventDetail.subject}" type="strong"/>
-                                    <label text="from ${fromPerson ? fromPerson.firstName + ' ' + fromPerson?.lastName : 'Unknown'}" type="span"/>
-                                    <label text="at ${ec.l10n.format(commEventDetail.entryDate, 'yyyy-MM-dd HH:mm')}" type="span"/>
-                                    <dynamic-dialog id="ReplyCommentContainer${uniqueExtension}" button-text="Reply" transition="taskCommentReply">
-                                        <parameter name="parentCommEventId" from="commEventDetail.communicationEventId"/>
-                                    </dynamic-dialog>
-                                    <dynamic-dialog id="EditCommentContainer${uniqueExtension}" button-text="Edit" transition="taskCommentUpdate">
-                                        <parameter name="communicationEventId" from="commEventDetail.communicationEventId"/>
-                                    </dynamic-dialog>
-                                    <link text="Delete" url="deleteComment" parameter-map="[workEffortId:workEffortId,
+                <container-box><box-header title="Comments"/><box-toolbar>
+                    <container-dialog id="AddCommentDialog" button-text="Add Comment">
+                        <form-single name="AddCommentForm" transition="addComment">
+                            <field name="workEffortId"><default-field><hidden/></default-field></field>
+                            <field name="subject"><default-field><text-line/></default-field></field>
+                            <field name="body"><default-field title="Comment"><text-area rows="10"/></default-field></field>
+                            <field name="submitButton"><default-field title="Add"><submit/></default-field></field>
+                        </form-single>
+                    </container-dialog>
+                </box-toolbar><box-body>
+                    <section-iterate name="CommentList" list="commEventDetailList" entry="commEventDetail"><actions>
+                        <set field="uniqueExtension" from="commEventDetail_index"/>
+                        <entity-find-one entity-name="mantle.party.Person" value-field="fromPerson" cache="true">
+                            <field-map field-name="partyId" from="commEventDetail.fromPartyId"/>
+                        </entity-find-one>
+                        <entity-find entity-name="mantle.party.communication.CommunicationEvent" list="childCeList">
+                            <econdition field-name="rootCommEventId" from="commEventDetail.communicationEventId"/>
+                            <order-by field-name="entryDate"/>
+                        </entity-find>
+                    </actions><widgets>
+                        <container style="task-comment">
+                            <label text="${commEventDetail.subject}" type="strong"/>
+                            <label text="from ${fromPerson ? fromPerson.firstName + ' ' + fromPerson?.lastName : 'Unknown'}" type="span"/>
+                            <label text="at ${ec.l10n.format(commEventDetail.entryDate, 'yyyy-MM-dd HH:mm')}" type="span"/>
+                            <dynamic-dialog id="ReplyCommentContainer${uniqueExtension}" button-text="Reply" transition="TaskCommentReply">
+                                <parameter name="parentCommEventId" from="commEventDetail.communicationEventId"/></dynamic-dialog>
+                            <dynamic-dialog id="EditCommentContainer${uniqueExtension}" button-text="Edit" transition="TaskCommentUpdate">
+                                <parameter name="communicationEventId" from="commEventDetail.communicationEventId"/></dynamic-dialog>
+                            <link text="Delete" url="deleteComment" parameter-map="[workEffortId:workEffortId,
                                         communicationEventId:commEventDetail.communicationEventId]"
-                                          confirmation="Delete comment ${commEventDetail.subject}?"/>
+                                    confirmation="Delete comment ${commEventDetail.subject}?"/>
 
-                                    <label text="${commEventDetail.body}" type="pre" encode="false"/>
+                            <label text="${commEventDetail.body}" type="pre" encode="false"/>
 
-                                    <section name="ChildNestedComments">
-                                        <condition><expression>childCeList</expression></condition>
-                                        <actions><set field="currentCe" from="commEventDetail"/></actions>
-                                        <widgets><include-screen location="component://HiveMind/screen/HiveMindRoot/Task/TaskSummary/TaskCommentNested.xml"/></widgets>
-                                    </section>
-                                </container>
-                            </widgets>
-                        </section-iterate>
-                    </box-body>
-                </container-box>
+                            <section name="ChildNestedComments">
+                                <condition><expression>childCeList</expression></condition>
+                                <actions><set field="currentCe" from="commEventDetail"/></actions>
+                                <widgets><include-screen location="component://HiveMind/screen/HiveMindRoot/Task/TaskSummary/TaskCommentNested.xml"/></widgets>
+                            </section>
+                        </container>
+                    </widgets></section-iterate>
+                </box-body></container-box>
             </row-col>
             <row-col lg="3" md="3">
                 <container-box>
-                    <box-header><label text="Status History" type="h5"/></box-header>
+                    <box-header title="Status History"/>
                     <box-body>
                         <section-iterate name="StatusHistoryList" list="statusHistoryList" entry="statusHistory">
                             <actions>
@@ -332,7 +350,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </container-box>
 
                 <container-box>
-                    <box-header><label text="Child Tasks" type="h5"/></box-header>
+                    <box-header title="Child Tasks"/>
                     <box-toolbar>
                         <section name="NewChildTaskSection">
                             <actions>
@@ -340,9 +358,12 @@ along with this software (see the LICENSE.md file). If not, see
                                 <set field="milestoneWorkEffortId" from="milestone?.workEffortId"/>
                                 <set field="parentWorkEffortId" from="workEffortId"/>
                                 <entity-find entity-name="mantle.work.effort.WorkEffortAndParty" list="myProjectList">
-                                    <date-filter/>
-                                    <econdition field-name="partyId" from="ec.user.userAccount.partyId"/>
+                                    <econditions combine="or">
+                                        <econdition field-name="visibilityEnumId" operator="in" value="WevGeneral,WevAllUsers"/>
+                                        <econditions><date-filter/><econdition field-name="partyId" from="ec.user.userAccount.partyId"/></econditions>
+                                    </econditions>
                                     <econdition field-name="workEffortTypeEnumId" value="WetProject"/>
+                                    <order-by field-name="workEffortId"/>
                                 </entity-find>
                             </actions>
                             <widgets>
@@ -376,7 +397,7 @@ along with this software (see the LICENSE.md file). If not, see
 
 
                 <container-box>
-                    <box-header><label text="Related" type="h5"/></box-header>
+                    <box-header title="Related"/>
                     <box-body>
                         <section-iterate name="TaskRelatedToList" list="relatedToList" entry="relatedTo">
                             <actions>
@@ -408,7 +429,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </container-box>
 
                 <container-box>
-                    <box-header><label text="Requests" type="h5"/></box-header>
+                    <box-header title="Requests"/>
                     <box-body>
                         <section-iterate name="TaskRequestList" list="werdList" entry="werd">
                             <actions>
@@ -429,7 +450,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </container-box>
 
                 <container-box>
-                    <box-header><label text="Wiki Pages" type="h5"/></box-header>
+                    <box-header title="Wiki Pages"/>
                     <box-body>
                         <section-iterate name="TaskWikiPageList" list="wpaweList" entry="wpawe">
                             <widgets><container>
@@ -439,6 +460,51 @@ along with this software (see the LICENSE.md file). If not, see
                         </section-iterate>
                     </box-body>
                 </container-box>
+
+                <container-box><box-header title="Content"/><box-toolbar>
+                    <container-dialog id="NewContentDialog" button-text="Add Content">
+                        <form-single name="NewContentForm" transition="createContent">
+                            <field name="workEffortId"><default-field><hidden/></default-field></field>
+                            <field name="contentTypeEnumId"><default-field title="Content Type">
+                                <widget-template-include location="component://webroot/template/screen/BasicWidgetTemplates.xml#enumDropDown">
+                                    <set field="enumTypeId" value="WorkEffortContentType"/><set field="allowEmpty" value="true"/></widget-template-include>
+                            </default-field></field>
+                            <field name="contentFile"><default-field><file/></default-field></field>
+                            <field name="description"><default-field><text-line size="60"/></default-field></field>
+                            <field name="submitButton"><default-field title="Add"><submit/></default-field></field>
+                        </form-single>
+                    </container-dialog>
+                </box-toolbar><box-body>
+                    <section-iterate name="ContentIterateSection" list="contentList" entry="content"><actions>
+                        <entity-find-one entity-name="mantle.party.PersonWithUserAccount" value-field="paua">
+                            <field-map field-name="userId" from="content.userId"/></entity-find-one>
+                        <entity-find-one entity-name="moqui.basic.Enumeration" value-field="contentTypeEnum">
+                            <field-map field-name="enumId" from="content.contentTypeEnumId"/></entity-find-one>
+                    </actions><widgets>
+                        <container>
+                            <container><label text="${contentTypeEnum?.description?:'No Type'}" type="strong"/></container>
+                            <link url="downloadContent" condition="content.contentLocation"
+                                  parameter-map="[workEffortContentId:content.workEffortContentId]"
+                                  text="Download ${content.contentLocation.substring(content.contentLocation.lastIndexOf('/')+1)}"/>
+                            <container-dialog id="UpdateContentContainer" button-text="Edit Content">
+                                <form-single name="UpdateContentForm" transition="updateContent" map="content">
+                                    <field name="workEffortContentId"><default-field><hidden/></default-field></field>
+                                    <field name="workEffortId"><default-field><hidden/></default-field></field>
+                                    <field name="contentTypeEnumId"><default-field title="Content Type">
+                                        <widget-template-include location="component://webroot/template/screen/BasicWidgetTemplates.xml#enumDropDown">
+                                            <set field="enumTypeId" value="WorkEffortContentType"/><set field="allowEmpty" value="true"/></widget-template-include>
+                                    </default-field></field>
+                                    <field name="contentFile"><default-field><file/></default-field></field>
+                                    <field name="description"><default-field><text-line size="60"/></default-field></field>
+                                    <field name="submitButton"><default-field title="Update"><submit/></default-field></field>
+                                </form-single>
+                            </container-dialog>
+                            <container><label condition="paua" text="By ${ec.resource.expand('UsernameTemplate','',paua+[userId:content.userId])} at ${ec.l10n.format(content.contentDate, 'yyyy-MM-dd HH:mm')}"/></container>
+                            <label text="${content.description ?: 'No Description'}" type="p"/>
+                        </container>
+                    </widgets></section-iterate>
+                </box-body></container-box>
+
             </row-col>
         </container-row>
     </widgets>

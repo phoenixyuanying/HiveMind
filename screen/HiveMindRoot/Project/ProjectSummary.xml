@@ -12,11 +12,10 @@ You should have received a copy of the CC0 Public Domain Dedication
 along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
-<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-2.1.xsd">
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-2.1.xsd">
 
-    <parameter name="workEffortId" required="true"/>
-    <parameter name="rootWorkEffortId"/>
+    <parameter name="workEffortId" from="rootWorkEffortId ?: workEffortId" required="true"/>
+    <parameter name="rootWorkEffortId" from="rootWorkEffortId ?: workEffortId"/>
 
     <transition name="editClient"><default-response url="//hmadmin/Client/EditClient"/></transition>
     <transition name="editVendor"><default-response url="//hmadmin/Vendor/EditVendor"/></transition>
